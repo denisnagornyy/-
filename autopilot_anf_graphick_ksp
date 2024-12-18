@@ -45,7 +45,7 @@ while altitude_stream() < 87000:
     collect_data()
     time.sleep(0.1)
 
-print("Достигнута высота 87 км, отключаем двигатель.")
+print("Достигнута высота 87 км.")
 vessel.control.throttle = 0
 time.sleep(1)
 collect_data()
