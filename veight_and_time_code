@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Данные ракеты Р-1Б
+# Данные ракеты Р-1В
 start_mass = 13910  # начальная масса, кг
 fuel_mass = 9440    # масса топлива, кг
 burn_time = 65      # время работы двигателя, сек
