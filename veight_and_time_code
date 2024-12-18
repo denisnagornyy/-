@@ -1,0 +1,37 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Данные ракеты Р-1Б
+start_mass = 13910  # начальная масса, кг
+fuel_mass = 9440    # масса топлива, кг
+burn_time = 65      # время работы двигателя, сек
+
+# Расход топлива, кг/с
+mass_flow_rate = fuel_mass / burn_time
+
+# Время от 0 до 150 секунд
+extended_time = np.linspace(0, 150, 1500)
+
+# Вычисление массы ракеты на всем интервале времени
+mass = np.piecewise(
+    extended_time,
+    [extended_time <= burn_time,
+     (extended_time > burn_time) & (extended_time <= 140),
+     extended_time > 140],
+    [lambda t: start_mass - mass_flow_rate * t,  # Уменьшение массы во время работы двигателя
+     lambda t: start_mass - fuel_mass,          # Постоянная масса после выработки топлива
+     lambda t: 590]                            # Масса после отделения кабины
+)
+
+# Построение графика массы
+plt.figure(figsize=(10, 5))
+plt.plot(extended_time, mass, label="Масса ракеты (кг)", color='blue')
+plt.xlabel("Время, сек")
+plt.ylabel("Масса, кг")
+plt.title("Зависимость массы ракеты Р-1Б от времени")
+plt.axvline(x=140, color='red', linestyle='--', label='Отделение кабины')
+plt.grid(True)
+plt.legend()
+
+# Отображение графика
+plt.show()
