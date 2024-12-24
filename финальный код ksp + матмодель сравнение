@@ -1,0 +1,184 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.integrate import solve_ivp
+import krpc
+import time as ksp_time
+
+# === Часть 1: Данные математической модели === #
+
+# Заданные параметры
+m0 = 14320
+fuel_mass = 9440
+burn_time = 65
+thrust = 264600
+Cd = 0.4
+rho0 = 1.225
+g = 9.81
+S = np.pi * (1.65 / 2) ** 2
+mdot = fuel_mass / burn_time
+R = 6371000
+Ms = 5.972e24
+G = 6.67430e-11
+
+# Функция плотности воздуха
+def air_density(h):
+    if h < 11000:
+        return rho0 * (1 - 0.0065 * h / 288.15) ** 4.256
+    elif h < 20000:
+        return rho0 * 0.22336 * np.exp(-0.000157 * (h - 11000))
+    else:
+        return 0
+
+def rocket_dynamics(t, y):
+    h, v, m = y
+    if m > m0 - fuel_mass:
+        F = thrust
+        dm_dt = -mdot
+    else:
+        F = 0
+        dm_dt = 0
+
+    D = 0.5 * Cd * air_density(h) * v**2 * S
+    g_eff = G * Ms / (R + h)**2
+    dv_dt = (F - D - m * g_eff) / m
+    dh_dt = v
+    return [dh_dt, dv_dt, dm_dt]
+
+# Решение дифференциальных уравнений
+h0, v0, y0 = 0, 0, [0, 0, m0]
+t_span = (0, 200)
+t_eval = np.linspace(*t_span, 1000)
+solution = solve_ivp(rocket_dynamics, t_span, y0, t_eval=t_eval)
+
+time_model = solution.t
+height_model = solution.y[0]
+velocity_model = solution.y[1]
+mass_model = solution.y[2]
+
+# === Часть 2: Данные из KSP === #
+
+conn = krpc.connect(name='P-1B Mission')
+vessel = conn.space_center.active_vessel
+body = vessel.orbit.body
+surface_reference_frame = vessel.orbit.body.reference_frame
+
+vessel.auto_pilot.engage()
+vessel.auto_pilot.target_pitch_and_heading(90, 90)
+vessel.auto_pilot.target_roll = 0
+vessel.auto_pilot.stopping_time = (0.1, 0.1, 0.1)
+
+vessel.control.throttle = 1.0
+
+print("Запуск!")
+vessel.control.activate_next_stage()
+ksp_time.sleep(1)
+
+altitude_stream = conn.add_stream(getattr, vessel.flight(), 'surface_altitude')
+mass_stream = conn.add_stream(getattr, vessel, 'mass')
+vertical_speed_stream = conn.add_stream(getattr, vessel.flight(surface_reference_frame), 'vertical_speed')
+
+times_ksp = []
+masses_ksp = []
+vertical_speeds_ksp = []
+altitudes_ksp = []
+
+start_time = ksp_time.time()
+
+def collect_ksp_data(mass=None):
+    current_time = ksp_time.time() - start_time
+    vertical_speed = abs(vertical_speed_stream())
+    altitude = altitude_stream()
+    if mass is None:
+        mass = mass_stream()
+    times_ksp.append(current_time)
+    masses_ksp.append(mass)
+    vertical_speeds_ksp.append(vertical_speed)
+    altitudes_ksp.append(altitude)
+    print(f"Время: {current_time:.2f} с, Масса: {mass:.2f} кг, Вертикальная скорость: {vertical_speed:.2f} м/с, Высота: {altitude:.2f} м")
+    return current_time
+
+def plot_intermediate_results():
+    plt.figure(figsize=(15, 10))
+
+    # График высоты
+    plt.subplot(3, 1, 1)
+    plt.plot(time_model, height_model / 1000, label="Математическая модель", color="blue")
+    plt.plot(times_ksp, np.array(altitudes_ksp) / 1000, label="Данные KSP", linestyle="--", color="orange")
+    plt.xlabel("Время (с)")
+    plt.ylabel("Высота (км)")
+    plt.title("Высота от времени")
+    plt.grid()
+    plt.legend()
+
+    # График скорости
+    plt.subplot(3, 1, 2)
+    plt.plot(time_model, velocity_model, label="Математическая модель", color="green")
+    plt.plot(times_ksp, vertical_speeds_ksp, label="Данные KSP", linestyle="--", color="red")
+    plt.xlabel("Время (с)")
+    plt.ylabel("Скорость (м/с)")
+    plt.title("Скорость от времени")
+    plt.grid()
+    plt.legend()
+
+    # График массы
+    plt.subplot(3, 1, 3)
+    plt.plot(time_model, mass_model, label="Математическая модель", color="purple")
+    plt.plot(times_ksp, masses_ksp, label="Данные KSP", linestyle="--", color="brown")
+    plt.xlabel("Время (с)")
+    plt.ylabel("Масса (кг)")
+    plt.title("Масса от времени")
+    plt.grid()
+    plt.legend()
+
+    plt.tight_layout()
+    plt.show()
+
+while altitude_stream() < 87000:
+    current_time = collect_ksp_data()
+    if int(current_time) == 200:  # Вывод промежуточного результата
+        plot_intermediate_results()
+    ksp_time.sleep(0.1)
+
+print("Достигнута высота 87 км.")
+vessel.control.throttle = 0
+ksp_time.sleep(1)
+collect_ksp_data()
+print("Отделяем кабину.")
+vessel.control.activate_next_stage()
+ksp_time.sleep(5)
+
+detachment_time = ksp_time.time() - start_time
+vessel = conn.space_center.active_vessel
+
+cabin_mass = 810
+collect_ksp_data(mass=cabin_mass)
+
+vessel.auto_pilot.engage()
+vessel.auto_pilot.target_pitch_and_heading(90, 90)
+vessel.auto_pilot.target_roll = 0
+
+print("Подъем продолжается до апогея...")
+while altitude_stream() < 100000:
+    current_time = collect_ksp_data(mass=cabin_mass)
+    if int(current_time) == 200:  # Вывод промежуточного результата
+        plot_intermediate_results()
+    ksp_time.sleep(0.1)
+
+print("Апогей достигнут. Начинается снижение.")
+
+while altitude_stream() > 5000:
+    current_time = collect_ksp_data(mass=cabin_mass)
+    if int(current_time) == 200:  # Вывод промежуточного результата
+        plot_intermediate_results()
+    ksp_time.sleep(0.1)
+
+print("Раскрытие парашюта.")
+vessel.control.activate_next_stage()
+collect_ksp_data(mass=cabin_mass)
+
+print("Ожидание приземления...")
+while not vessel.situation == conn.space_center.VesselSituation.landed:
+    ksp_time.sleep(1)
+
+# Финальные графики
+plot_intermediate_results()
